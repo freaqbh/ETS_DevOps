@@ -1,0 +1,9 @@
+# .gitignore
+node_modules/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.pem
+.env
+ansible/jenkins_home_local/

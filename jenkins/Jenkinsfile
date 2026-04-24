@@ -1,0 +1,126 @@
+pipeline {
+    agent any
+
+    triggers {
+        githubPush()
+    }
+
+    environment {
+        DOCKER_CRED_ID  = 'dockerhub-credentials'
+        SSH_CRED_ID     = 'target-vm-ssh'
+        SLACK_CRED_ID   = 'slack-token'          // ← Gunakan ini, bukan SLACK_WORKSPACE
+
+        DOCKER_IMAGE    = 'abhi1020/miniproject3-app'
+        TARGET_IP       = '85.211.253.241'
+        SSH_USER_NAME   = 'azureuser'            // ← Pisah jadi variabel agar jelas
+
+        GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        IMAGE_TAG        = "${GIT_COMMIT_SHORT}"
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                echo "Mengambil kode dari repository..."
+                checkout scm
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                echo "Membangun Docker Image versi: ${IMAGE_TAG}"
+                dir('app') {
+                    // ← Pakai double-quote agar variabel diinterpolasi Groovy
+                    sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
+                }
+            }
+        }
+
+        stage('Security Scan (DevSecOps)') {
+            steps {
+                echo "Menginstal plugin Docker Scout CLI..."
+                sh 'curl -sSfL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh -s --'
+                echo "Memindai kerentanan menggunakan Docker Scout..."
+                sh "docker scout cves --exit-code --only-severity critical,high ${DOCKER_IMAGE}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Push to Registry') {
+            steps {
+                echo "Mengunggah image ke Docker Hub..."
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKER_CRED_ID,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
+                }
+            }
+        }
+
+        stage('Deploy to Target Node') {
+            steps {
+                echo "Men-deploy image versi ${IMAGE_TAG} ke Local Target..."
+                // Tidak perlu SSH, langsung jalankan Docker!
+                sh """
+                    docker pull ${DOCKER_IMAGE}:${IMAGE_TAG}
+                    docker stop myapp-prod || true
+                    docker rm myapp-prod || true
+                    docker run -d -p 80:3000 --name myapp-prod ${DOCKER_IMAGE}:${IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                echo "Melakukan pengujian pasca-deployment..."
+                sh "sleep 5 && curl -f http://localhost:80/health || exit 1"
+            }
+        }
+
+    post {
+        success {
+            echo "Deployment Berhasil!"
+            slackSend(
+                tokenCredentialId: env.SLACK_CRED_ID,  // ← FIX: pakai tokenCredentialId
+                channel: '#deployments',
+                color: 'good',
+                message: "✅ *Deployment Berhasil* | Commit: `${IMAGE_TAG}` | Build #${env.BUILD_NUMBER}"
+            )
+        }
+
+        failure {
+            echo "Deployment Gagal! Memulai Rollback..."
+            // Slack dulu — jangan blok rollback kalau slack gagal
+            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                slackSend(
+                    tokenCredentialId: env.SLACK_CRED_ID,  // ← FIX
+                    channel: '#deployments',
+                    color: 'danger',
+                    message: "🚨 *Deployment Gagal* | Commit: `${IMAGE_TAG}` | Rollback dimulai..."
+                )
+            }
+
+            script {
+                sh """
+                    echo "Menjalankan Rollback di Local Target..."
+                    docker stop myapp-prod || true
+                    docker rm myapp-prod || true
+                    docker run -d -p 80:3000 --name myapp-prod ${DOCKER_IMAGE}:latest
+                """
+            }
+
+            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                slackSend(
+                    tokenCredentialId: env.SLACK_CRED_ID,
+                    channel: '#deployments',
+                    color: 'warning',
+                    message: "⚠️ *Rollback Selesai* | Sistem kembali ke versi sebelumnya."
+                )
+            }
+        }
+    }
+}

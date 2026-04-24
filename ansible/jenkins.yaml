@@ -1,0 +1,42 @@
+jenkins:
+  systemMessage: "Pipeline CI/CD Otomatis (Demo Lokal Kelompok 1)"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "adminpassword"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "dockerhub-credentials"
+              username: "abhi1020"
+              password: "${DOCKER_HUB_PASSWORD}"
+          - string:
+              scope: GLOBAL
+              id: "slack-token"
+              secret: "${SLACK_TOKEN}"
+
+jobs:
+  - script: >
+      pipelineJob('CI-CD-Pipeline-App') {
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/ludw1gd/devops-miniproject-3-kel1.git') }
+                branches('local-demo') # Ganti ke 'main' jika Anda tidak menggunakan branch khusus
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile')
+          }
+        }
+        triggers {
+          githubPush()
+        }
+      }

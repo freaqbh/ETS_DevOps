@@ -1,0 +1,208 @@
+---
+- name: Persiapan Node (Install Docker)
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies dasar
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - gnupg
+        state: present
+
+    - name: Buat direktori keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Tambahkan GPG key Docker (cara modern)
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Tambahkan repository Docker
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable"
+        state: present
+
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+- name: Fix Docker permission di Target VM
+  hosts: target
+  become: yes
+  tasks:
+    - name: Tambahkan user azureuser ke grup docker
+      user:
+        name: azureuser
+        groups: docker
+        append: yes
+
+    - name: Set permission docker.sock
+      file:
+        path: /var/run/docker.sock
+        mode: '0666'
+
+# ==========================================
+- name: Konfigurasi Jenkins via JCasC (Strategi 2-Fase)
+  hosts: jenkins
+  become: yes
+  tasks:
+    # ==========================================
+    # PERSIAPAN LINGKUNGAN
+    # ==========================================
+    - name: Set permission folder Jenkins Home
+      file:
+        path: /var/jenkins_home
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+
+    - name: Buat direktori untuk JCasC
+      file:
+        path: /var/jenkins_home/casc_configs
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+
+    - name: Copy file konfigurasi JCasC
+      copy:
+        src: ./jenkins.yaml
+        dest: /var/jenkins_home/casc_configs/jenkins.yaml
+        owner: 1000
+        group: 1000
+
+    - name: Hapus kontainer lama jika ada
+      command: docker rm -f jenkins
+      ignore_errors: yes
+
+    # ==========================================
+    # BUILD CUSTOM IMAGE (FIX docker not found)
+    # ==========================================
+    - name: Copy Dockerfile.jenkins ke server
+      copy:
+        src: ./Dockerfile.jenkins       # letakkan di folder ansible/
+        dest: /tmp/Dockerfile.jenkins
+
+    - name: Build custom Jenkins image dengan Docker CLI
+      command: docker build -f /tmp/Dockerfile.jenkins -t jenkins-with-docker:latest /tmp
+      register: build_result
+      failed_when: build_result.rc != 0
+      changed_when: "'Successfully built' in build_result.stdout or 'writing image' in build_result.stdout"
+
+    # ==========================================
+    # FASE 1: JALANKAN JENKINS POLOS
+    # ==========================================
+    - name: Fase 1 - Jalankan Jenkins Container (Tanpa JCasC)
+      community.docker.docker_container:
+        name: jenkins
+        image: jenkins-with-docker:latest    # ← custom image
+        state: started
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /var/jenkins_home:/var/jenkins_home
+        user: root
+        env:
+          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+
+    - name: Tunggu Jenkins HTTP ready
+      uri:
+        url: "http://localhost:8080/login"
+        status_code: 200
+        validate_certs: no
+      register: jenkins_status
+      until: jenkins_status.status == 200
+      retries: 30
+      delay: 10
+
+    # ==========================================
+    # INSTALASI PLUGIN
+    # ==========================================
+    - name: Instal plugin Jenkins yang diperlukan
+      command: >
+        docker exec jenkins jenkins-plugin-cli --plugins
+        configuration-as-code
+        git
+        workflow-aggregator
+        credentials-binding
+        docker-workflow
+        slack
+        job-dsl
+        github-pullrequest:0.7.3
+      register: plugin_result
+      failed_when: plugin_result.rc != 0
+
+    - name: Restart Jenkins agar plugin aktif
+      command: docker restart jenkins
+
+    - name: Tunggu Jenkins ready setelah restart
+      uri:
+        url: "http://localhost:8080/login"
+        status_code: 200
+        validate_certs: no
+      register: jenkins_status
+      until: jenkins_status.status == 200
+      retries: 30
+      delay: 10
+
+    # ==========================================
+    # FASE 2: SUNTIKKAN KONFIGURASI JCASC
+    # ==========================================
+    - name: Fase 2 - Buat Ulang Jenkins Container (Dengan JCasC)
+      community.docker.docker_container:
+        name: jenkins
+        image: jenkins-with-docker:latest    # ← custom image
+        state: started
+        recreate: yes
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /var/jenkins_home:/var/jenkins_home
+        user: root
+        env:
+          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
+          TARGET_VM_PRIVATE_KEY: "{{ lookup('file', '../terraform/ssh_private_key.pem') }}"
+          DOCKER_HUB_PASSWORD: "{{ lookup('env', 'DOCKER_HUB_PASSWORD') }}"
+      no_log: true
+
+    - name: Tunggu Jenkins Fase 2 siap
+      uri:
+        url: "http://localhost:8080/login"
+        status_code: 200
+        validate_certs: no
+      register: jenkins_final
+      until: jenkins_final.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Verifikasi Docker CLI tersedia di dalam Jenkins
+      command: docker exec jenkins docker --version
+      register: docker_check
+      failed_when: docker_check.rc != 0
+
+    - name: Tampilkan versi Docker di Jenkins
+      debug:
+        msg: "✅ {{ docker_check.stdout }}"

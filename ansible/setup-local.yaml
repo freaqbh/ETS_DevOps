@@ -1,0 +1,83 @@
+---
+- name: Setup Jenkins Local Demo (Zero-Touch)
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Buat folder jenkins_home_local di laptop
+      file:
+        path: "{{ playbook_dir }}/jenkins_home_local/casc_configs"
+        state: directory
+        mode: '0777'
+
+    - name: Copy file konfigurasi JCasC
+      copy:
+        src: ./jenkins.yaml
+        dest: "{{ playbook_dir }}/jenkins_home_local/casc_configs/jenkins.yaml"
+
+    - name: Hapus kontainer lama jika ada
+      command: docker rm -f jenkins-local
+      ignore_errors: yes
+
+    - name: Build custom Jenkins image dengan Docker CLI (seperti di repo)
+      command: docker build -f ./Dockerfile.jenkins -t jenkins-with-docker:local .
+      register: build_result
+      changed_when: "'Successfully built' in build_result.stdout or 'writing image' in build_result.stdout"
+
+    - name: Fase 1 - Jalankan Jenkins Local (Port 8081)
+      command: >
+        docker run -d --name jenkins-local
+        -p 8081:8080 -p 50000:50000
+        -v /var/run/docker.sock:/var/run/docker.sock
+        -v "{{ playbook_dir }}/jenkins_home_local:/var/jenkins_home"
+        -u root
+        -e JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+        jenkins-with-docker:local
+
+    - name: Tunggu Jenkins melakukan inisialisasi awal (30 Detik)
+      pause:
+        seconds: 20
+
+    - name: Instal plugin Jenkins yang diperlukan
+      command: >
+        docker exec jenkins-local jenkins-plugin-cli --plugins
+        configuration-as-code
+        git
+        workflow-aggregator
+        credentials-binding
+        docker-workflow
+        slack
+        job-dsl
+        github-pullrequest:0.7.3
+      register: plugin_result
+      failed_when: plugin_result.rc != 0
+
+    - name: Restart Jenkins agar plugin aktif
+      command: docker restart jenkins-local
+
+    - name: Tunggu Jenkins restart dan siap kembali (20 Detik)
+      pause:
+        seconds: 20
+
+    - name: Fase 2 - Buat Ulang Jenkins Container (Dengan JCasC)
+      community.docker.docker_container:
+        name: jenkins-local
+        image: jenkins-with-docker:local    # ← custom image
+        state: started
+        recreate: yes
+        ports:
+          - "8081:8080"
+          - "50000:50000"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /var/jenkins_home:/var/jenkins_home
+        user: root
+        env:
+          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
+          DOCKER_HUB_PASSWORD: "{{ lookup('env', 'DOCKER_HUB_PASSWORD') }}"
+          SLACK_TOKEN: "{{ lookup('env', 'SLACK_TOKEN') }}"
+
+    - name: Selesai!
+      debug:
+        msg: "Setup berhasil! Silakan buka http://localhost:8081"
