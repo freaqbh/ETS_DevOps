@@ -79,7 +79,7 @@ pipeline {
                     docker pull ${DOCKER_IMAGE}:${IMAGE_TAG}
                     docker stop myapp-prod || true
                     docker rm myapp-prod || true
-                    docker run -d -p 80:3000 --name myapp-prod ${DOCKER_IMAGE}:${IMAGE_TAG}
+                    docker run -d -p 90:3000 --name myapp-prod ${DOCKER_IMAGE}:${IMAGE_TAG}
                 """
             }
         }
@@ -87,7 +87,7 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 echo "Melakukan pengujian pasca-deployment..."
-                sh "sleep 10 && curl -f http://localhost:80 || exit 1"
+                sh "sleep 10 && curl -f http://localhost:90 || exit 1"
             }
         }
     }
@@ -121,7 +121,7 @@ pipeline {
                     echo "Menjalankan Rollback di Local Target..."
                     docker stop myapp-prod || true
                     docker rm myapp-prod || true
-                    docker run -d -p 80:3000 --name myapp-prod ${DOCKER_IMAGE}:latest
+                    docker run -d -p 90:3000 --name myapp-prod ${DOCKER_IMAGE}:latest
                 """
             }
 
