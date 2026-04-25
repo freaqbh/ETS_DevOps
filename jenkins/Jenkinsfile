@@ -80,6 +80,7 @@ pipeline {
                 sh "sleep 5 && curl -f http://localhost:80/health || exit 1"
             }
         }
+    }
 
     post {
         success {
