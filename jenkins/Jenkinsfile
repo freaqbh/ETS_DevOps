@@ -87,7 +87,16 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 echo "Melakukan pengujian pasca-deployment..."
-                sh "sleep 10 && curl -f http://localhost:90 || exit 1"
+                sh '''
+                    sleep 5
+                    # 1. Dapatkan IP internal dari container myapp-prod
+                    CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' myapp-prod)
+                    
+                    echo "Aplikasi berjalan di Internal IP: $CONTAINER_IP"
+                    
+                    # 2. Lakukan curl langsung ke IP internal container dengan port 3000
+                    curl -f http://$CONTAINER_IP:3000/health || exit 1
+                '''
             }
         }
     }
