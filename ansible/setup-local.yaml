@@ -62,7 +62,7 @@
     - name: Fase 2 - Buat Ulang Jenkins Container (Dengan JCasC)
       community.docker.docker_container:
         name: jenkins-local
-        image: jenkins-with-docker:local    # ← custom image
+        image: jenkins-with-docker:local
         state: started
         recreate: yes
         ports:
@@ -70,11 +70,11 @@
           - "50000:50000"
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
-          - /var/jenkins_home:/var/jenkins_home
+          - "{{ playbook_dir }}/jenkins_home_local:/var/jenkins_home"
         user: root
         env:
           JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
-          CASC_JENKINS_CONFIG: "/var/jenkins_home/casc_configs/jenkins.yaml"
+          CASC_JENKINS_CONFIG: "{{ playbook_dir }}/jenkins_home_local/casc_configs/jenkins.yaml"
           DOCKER_HUB_PASSWORD: "{{ lookup('env', 'DOCKER_HUB_PASSWORD') }}"
           SLACK_TOKEN: "{{ lookup('env', 'SLACK_TOKEN') }}"
 
