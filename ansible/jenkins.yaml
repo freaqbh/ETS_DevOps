@@ -30,7 +30,7 @@ jobs:
             scm {
               git {
                 remote { url('https://github.com/ludw1gd/devops-miniproject-3-kel1.git') }
-                branches('local-demo') # Ganti ke 'main' jika Anda tidak menggunakan branch khusus
+                branches('main')
               }
             }
             scriptPath('jenkins/Jenkinsfile')
