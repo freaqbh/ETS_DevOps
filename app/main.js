@@ -3,7 +3,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Hello World! Deploy Otomatis via JCasC Berhasil!');
+    res.send('Hello World! Deploy Otomatis via JCasC Berhasil! 2');
 });
 
 // Endpoint untuk smoke test post-deployment

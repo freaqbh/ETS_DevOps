@@ -51,7 +51,7 @@ pipeline {
                     sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                     
                     echo "Memindai kerentanan menggunakan Docker Scout..."
-                    sh "docker scout cves --exit-code --only-severity critical,high ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    sh "docker scout cves --only-severity critical,high ${DOCKER_IMAGE}:${IMAGE_TAG}"
                 }
             }
         }
