@@ -96,7 +96,8 @@ pipeline {
         success {
             echo "Deployment Berhasil!"
             slackSend(
-                tokenCredentialId: env.SLACK_CRED_ID,  // ← FIX: pakai tokenCredentialId
+                tokenCredentialId: env.SLACK_CRED_ID,
+                botUser: true,
                 channel: '#deployments',
                 color: 'good',
                 message: "✅ *Deployment Berhasil* | Commit: `${IMAGE_TAG}` | Build #${env.BUILD_NUMBER}"
@@ -105,10 +106,10 @@ pipeline {
 
         failure {
             echo "Deployment Gagal! Memulai Rollback..."
-            // Slack dulu — jangan blok rollback kalau slack gagal
             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 slackSend(
-                    tokenCredentialId: env.SLACK_CRED_ID,  // ← FIX
+                    tokenCredentialId: env.SLACK_CRED_ID,
+                    botUser: true,
                     channel: '#deployments',
                     color: 'danger',
                     message: "🚨 *Deployment Gagal* | Commit: `${IMAGE_TAG}` | Rollback dimulai..."
@@ -127,6 +128,7 @@ pipeline {
             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 slackSend(
                     tokenCredentialId: env.SLACK_CRED_ID,
+                    botUser: true,
                     channel: '#deployments',
                     color: 'warning',
                     message: "⚠️ *Rollback Selesai* | Sistem kembali ke versi sebelumnya."
