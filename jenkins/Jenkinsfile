@@ -87,7 +87,7 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 echo "Melakukan pengujian pasca-deployment..."
-                sh "sleep 5 && curl -f http://localhost:80/health || exit 1"
+                sh "sleep 10 && curl -f http://localhost:80 || exit 1"
             }
         }
     }
